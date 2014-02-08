@@ -1,0 +1,7 @@
+# chdir commands
+c0: cd /var/log
+c1: cd /tmp
+c2: cd /usr/bin
+# shutdown commands
+s!: sudo /sbin/shutdown -h now
+r!: sudo /sbin/shutdown -r now
