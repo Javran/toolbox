@@ -2,11 +2,15 @@ import System.Directory (getAppUserDataDirectory
                         ,createDirectoryIfMissing
                         ,doesFileExist)
 import System.FilePath.Posix ((</>))
+import qualified System.IO.Strict as S
 import System.IO
 import Control.Monad
 import Data.Maybe
 import Text.Parsec
 import Text.Parsec.ByteString
+import Data.Char
+import Data.Either
+import qualified Data.ByteString.Char8 as B
 
 data Shorthand = Shorthand
     { keyS     :: String
@@ -20,40 +24,38 @@ confDir = getAppUserDataDirectory "toolbox-haskell"
 confFile :: IO FilePath
 confFile = liftM (</> "toolbox.conf") confDir
 
-touchConfigFile :: IO ()
+touchConfigFile :: IO FilePath
 touchConfigFile = do
     d <- confDir
     createDirectoryIfMissing True d
     exists <- confFile >>= doesFileExist  
     unless exists
-        (confFile >>= \path -> openFile path AppendMode >>= hClose)
+        (confFile >>= (`openFile` AppendMode) >>= hClose)
+    confFile     
 
 loadConfig :: IO [Shorthand]
 loadConfig = do
-    touchConfigFile
-    fn <- confFile
-    conf <- parseFromFile parseConf fn
-    return $ either (const []) id conf
+    fn <- touchConfigFile
+    contents <- S.readFile fn
+    let contentLines = lines contents
+    let isCommentLine s =
+            null s
+         || all isSpace s
+         || head s == '#'
+    let confLinesB = map B.pack $ filter (not . isCommentLine) contentLines
+    return $ rights $ map parseConfLine confLinesB
 
-parseConf = liftM simplifyResult parseAll
-    where
-        toShortHand :: (String, Bool, String) -> Shorthand
-        toShortHand (k,c,v) = Shorthand k v c
-
-        simplifyResult :: [Maybe (String, Bool, String)] -> [Shorthand]
-        simplifyResult = map toShortHand . catMaybes
-
-        parseAll = many1 $ choice [parseRuleLine, parseCommentLine]
-        parseRuleLine = do
+parseConfLine :: B.ByteString -> Either ParseError Shorthand
+parseConfLine line = parse lineParser "StupidArgument" line
+  where
+    lineParser :: Parser Shorthand
+    lineParser = do
             key <- many1 alphaNum
             confirm <- optionMaybe $ char '!'
             char ':'
             spaces
-            value <- manyTill anyChar newline
-            return $ Just (key, isJust confirm, value)
-        parseCommentLine = do
-            char '#'
-            manyTill anyChar newline
-            return Nothing
+            value <- (many1 anyChar) >>= \a -> eof >> return a
+            return $ Shorthand key value $ isJust confirm
 
+main :: IO ()
 main = loadConfig >>= print
